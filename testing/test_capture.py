@@ -5,6 +5,7 @@ from collections.abc import Generator
 import contextlib
 import io
 from io import UnsupportedOperation
+import json
 import os
 import re
 import subprocess
@@ -107,8 +108,9 @@ class TestCaptureManager:
         not re-enable out/err capture if they were already suspended (#13322).
         """
         capouter = StdCaptureFD()
+        capouter.start_capturing()
+        capman = CaptureManager(method)
         try:
-            capman = CaptureManager(method)
             capman.start_global_capturing()
             mc = capman._global_capturing
             assert mc is not None
@@ -129,8 +131,30 @@ class TestCaptureManager:
             assert not mc.err.is_started()
             assert mc.in_.is_started()
 
-            capman.stop_global_capturing()
+            suspended_after_resume = not mc.is_started()
+            with capman.global_and_fixture_disabled():
+                print("inside disabled stdout", flush=True)
+                print("inside disabled stderr", file=sys.stderr, flush=True)
+            print("after disabled stdout", flush=True)
+            print("after disabled stderr", file=sys.stderr, flush=True)
+            captured = capman.read_global_capture()
+            live = capouter.readouterr()
+
+            assert (
+                suspended_after_resume,
+                mc.is_started(),
+                mc.out.is_started(),
+                mc.err.is_started(),
+                captured,
+            ) == (True, False, False, False, ("", "")), (
+                "disabled context restarted suspended capture"
+            )
+            assert live == (
+                "inside disabled stdout\nafter disabled stdout\n",
+                "inside disabled stderr\nafter disabled stderr\n",
+            )
         finally:
+            capman.stop_global_capturing()
             capouter.stop_capturing()
 
     @pytest.mark.parametrize("method", ["sys", "fd"])
@@ -138,9 +162,8 @@ class TestCaptureManager:
         """suspend_global_capture(in_=True) + resume_global_capture() restores
         out/err to started when that was their state before the suspend (#13322).
         """
-        capouter = StdCaptureFD()
+        capman = CaptureManager(method)
         try:
-            capman = CaptureManager(method)
             capman.start_global_capturing()
             mc = capman._global_capturing
             assert mc is not None
@@ -148,19 +171,127 @@ class TestCaptureManager:
             assert mc.err is not None
             assert mc.in_ is not None
 
-            capman.suspend_global_capture(in_=True)
-            assert not mc.out.is_started()
-            assert not mc.err.is_started()
-            assert not mc.in_.is_started()
+            captured_stdin = sys.stdin
+            for cycle in range(2):
+                capman.suspend_global_capture(in_=True)
+                assert not mc.out.is_started()
+                assert not mc.err.is_started()
+                assert not mc.in_.is_started()
+                assert sys.stdin is not captured_stdin
 
-            capman.resume_global_capture()
-            assert mc.out.is_started()
-            assert mc.err.is_started()
-            assert mc.in_.is_started()
+                capman.resume_global_capture()
+                assert mc.is_started()
+                assert mc.out.is_started()
+                assert mc.err.is_started()
+                assert mc.in_.is_started()
+                assert sys.stdin is captured_stdin
+                print(f"stdout {cycle}", flush=True)
+                print(f"stderr {cycle}", file=sys.stderr, flush=True)
+                assert capman.read_global_capture() == (
+                    f"stdout {cycle}\n",
+                    f"stderr {cycle}\n",
+                )
 
-            capman.stop_global_capturing()
         finally:
-            capouter.stop_capturing()
+            capman.stop_global_capturing()
+
+    @pytest.mark.parametrize("method", ["sys", "fd"])
+    @pytest.mark.parametrize(
+        "out_started,err_started",
+        [(True, True), (True, False), (False, True), (False, False)],
+        ids=["out-err", "out-only", "err-only", "neither"],
+    )
+    def test_suspend_in_restores_independent_output_states(
+        self, method, out_started, err_started
+    ) -> None:
+        cap = StdCapture() if method == "sys" else StdCaptureFD()
+        cap.start_capturing()
+        try:
+            assert cap.out is not None
+            assert cap.err is not None
+            assert cap.in_ is not None
+            if not out_started:
+                cap.out.suspend()
+            if not err_started:
+                cap.err.suspend()
+
+            cap.suspend_capturing(in_=True)
+            cap.resume_capturing()
+
+            assert cap.is_started()
+            assert cap.in_.is_started()
+            assert cap.out.is_started() == out_started
+            assert cap.err.is_started() == err_started
+            print("independent stdout", flush=True)
+            print("independent stderr", file=sys.stderr, flush=True)
+            assert cap.readouterr() == (
+                "independent stdout\n" if out_started else "",
+                "independent stderr\n" if err_started else "",
+            )
+        finally:
+            cap.stop_capturing()
+
+    @pytest.mark.parametrize("method", ["sys", "fd"])
+    @pytest.mark.parametrize(
+        "out,err,in_",
+        [
+            (False, True, True),
+            (True, False, True),
+            (False, False, True),
+            (True, True, False),
+        ],
+        ids=["no-stdout", "no-stderr", "no-output", "no-stdin"],
+    )
+    def test_suspend_in_with_missing_streams(self, method, out, err, in_) -> None:
+        factory = StdCapture if method == "sys" else StdCaptureFD
+        cap = factory(out=out, err=err, in_=in_)
+        cap.start_capturing()
+        try:
+            if not in_:
+                # Without stdin there is no snapshot: resume starts outputs.
+                cap.suspend_capturing()
+            cap.suspend_capturing(in_=True)
+            cap.resume_capturing()
+            assert cap.is_started()
+            if cap.in_ is not None:
+                assert cap.in_.is_started()
+            if cap.out is not None:
+                assert cap.out.is_started()
+            if cap.err is not None:
+                assert cap.err.is_started()
+            print("present stdout", flush=True)
+            print("present stderr", file=sys.stderr, flush=True)
+            assert cap.readouterr() == (
+                "present stdout\n" if out else "",
+                "present stderr\n" if err else "",
+            )
+        finally:
+            cap.stop_capturing()
+
+    @pytest.mark.parametrize("method", ["sys", "fd"])
+    def test_suspend_in_snapshot_consumed_before_ordinary_resume(self, method) -> None:
+        capman = CaptureManager(method)
+        capman.start_global_capturing()
+        try:
+            capman.suspend_global_capture()
+            capman.suspend_global_capture(in_=True)
+            capman.resume_global_capture()
+            mc = capman._global_capturing
+            assert mc is not None
+            assert mc.out is not None and not mc.out.is_started()
+            assert mc.err is not None and not mc.err.is_started()
+
+            capman.suspend_global_capture()
+            capman.resume_global_capture()
+            assert mc.is_started()
+            print("ordinary stdout", flush=True)
+            print("ordinary stderr", file=sys.stderr, flush=True)
+            assert capman.read_global_capture() == (
+                "ordinary stdout\n",
+                "ordinary stderr\n",
+            )
+        finally:
+            capman.stop_global_capturing()
 
 
 @pytest.mark.parametrize("method", ["fd", "sys"])
@@ -1600,6 +1731,49 @@ def test_crash_on_closing_tmpfile_py27(
     assert result.ret == 0
     assert result.stderr.str() == ""
     result.stdout.no_fnmatch_line("*OSError*")
+
+
+@pytest.mark.parametrize("method", ["sys", "fd"])
+def test_live_logging_preserves_suspended_capture(
+    pytester: Pytester, method: str
+) -> None:
+    """A live logging handler must leave a plugin's suspended outputs alone."""
+    pytester.makeconftest(
+        """
+        import json
+        import logging
+        from pathlib import Path
+        import sys
+
+        def pytest_terminal_summary(config):
+            capman = config.pluginmanager.getplugin("capturemanager")
+            capman.suspend_global_capture(in_=False)
+            capman.suspend_global_capture(in_=True)
+            capman.resume_global_capture()
+
+            logging.warning("LIVE_WARNING")
+            print("LIVE_STDOUT", flush=True)
+            print("LIVE_STDERR", file=sys.stderr, flush=True)
+            captured = capman.read_global_capture()
+            Path("capture-state.json").write_text(json.dumps({
+                "started": capman._global_capturing.is_started(),
+                "out": captured.out,
+                "err": captured.err,
+            }), encoding="utf-8")
+        """
+    )
+    pytester.makepyfile("def test_pass(): pass")
+    result = pytester.runpytest_subprocess(
+        f"--capture={method}", "--log-cli-level=WARNING"
+    )
+    assert result.ret == ExitCode.OK
+    result.stdout.fnmatch_lines(["*WARNING*LIVE_WARNING*"])
+    observed = json.loads((pytester.path / "capture-state.json").read_text("utf-8"))
+    assert observed == {"started": False, "out": "", "err": ""}, (
+        "live logging restarted suspended capture"
+    )
+    result.stdout.fnmatch_lines(["*LIVE_STDOUT*"])
+    result.stderr.fnmatch_lines(["*LIVE_STDERR*"])
 
 
 def test_global_capture_with_live_logging(pytester: Pytester) -> None:
