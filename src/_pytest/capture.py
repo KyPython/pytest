@@ -44,6 +44,8 @@ from _pytest.reports import CollectReport
 
 
 _CaptureMethod = Literal["fd", "sys", "no", "tee-sys"]
+_CaptureState = Literal["initialized", "started", "suspended", "done"]
+_MultiCaptureState = Literal["started", "suspended", "stopped"]
 
 
 def pytest_addoption(parser: Parser) -> None:
@@ -303,7 +305,7 @@ class CaptureBase(abc.ABC, Generic[AnyStr]):
     EMPTY_BUFFER: AnyStr
     # Set by stateful subclasses in ``__init__``; left as ``None`` on
     # stateless implementations such as ``NoCapture``.
-    _state: str | None = None
+    _state: _CaptureState | None = None
 
     @abc.abstractmethod
     def __init__(self, fd: int) -> None:
@@ -633,12 +635,12 @@ else:
 
 
 class MultiCapture(Generic[AnyStr]):
-    _state = None
-    # Snapshot of (out_started, err_started) captured at the moment of the
+    _state: _MultiCaptureState | None = None
+    # Snapshot of (state, out_started, err_started) captured at the moment of the
     # first nested ``suspend_capturing(in_=True)`` call. ``None`` when no
     # nested suspend is in progress; non-``None`` iff the matching
     # ``resume_capturing`` still needs to restore that prior state (#13322).
-    _pre_suspend_state: tuple[bool, bool] | None = None
+    _pre_suspend_state: tuple[_MultiCaptureState | None, bool, bool] | None = None
 
     def __init__(
         self,
@@ -683,25 +685,26 @@ class MultiCapture(Generic[AnyStr]):
         """Suspend out/err (and ``in_`` when ``in_=True``).
 
         When ``in_=True`` and no nested suspend is already in progress, the
-        prior started/suspended state of out and err is snapshotted so that
-        the matching :meth:`resume_capturing` restores them to that state
-        instead of unconditionally restarting them. This supports plugin
-        hooks that suspend capture once for out/err and then nest a second
-        ``in_=True`` suspend to read user input -- without that snapshot,
-        the resume would re-enable out/err even though the caller intended
-        them to remain suspended (#13322).
+        prior aggregate state and started/suspended state of out and err
+        are snapshotted so that the matching :meth:`resume_capturing`
+        restores them instead of unconditionally restarting capture. This
+        supports plugin hooks that suspend capture once for out/err and then
+        nest a second ``in_=True`` suspend to read user input -- without that
+        snapshot, the resume would re-enable out/err even though the caller
+        intended them to remain suspended (#13322).
 
         The contract is that ``suspend_capturing(in_=True)`` and
         :meth:`resume_capturing` are called as a matched pair; nesting is
         single-depth, not arbitrary.
         """
-        self._state = "suspended"
         if in_ and self.in_ is not None and self._pre_suspend_state is None:
             self._pre_suspend_state = (
+                self._state,
                 self.out is not None and self.out.is_started(),
                 self.err is not None and self.err.is_started(),
             )
             self.in_.suspend()
+        self._state = "suspended"
         if self.out:
             self.out.suspend()
         if self.err:
@@ -711,20 +714,19 @@ class MultiCapture(Generic[AnyStr]):
         """Resume out/err (and ``in_`` if a matching nested suspend is active).
 
         If the matching :meth:`suspend_capturing` was called with
-        ``in_=True``, the snapshot taken at that point determines whether
-        out/err are restored to ``started`` -- streams that were already
+        ``in_=True``, the snapshot restores the aggregate state and determines
+        whether out/err are restored to ``started`` -- streams that were already
         suspended before the nested suspend remain suspended (#13322).
-        Otherwise, out/err are unconditionally resumed (the original
-        behaviour).
+        Otherwise, capture is unconditionally resumed (the original behaviour).
         """
-        self._state = "started"
         snap = self._pre_suspend_state
         if snap is not None:
             assert self.in_ is not None
             self.in_.resume()
-            out_was_started, err_was_started = snap
+            self._state, out_was_started, err_was_started = snap
             self._pre_suspend_state = None
         else:
+            self._state = "started"
             out_was_started = self.out is not None
             err_was_started = self.err is not None
         if out_was_started and self.out is not None:
