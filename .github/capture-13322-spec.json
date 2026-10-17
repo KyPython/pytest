@@ -1,0 +1,214 @@
+{
+  "schema_version": 1,
+  "scope": "Temporary fork-only capture specification gate. Intentional baseline failures prove regression discrimination, not implementation success.",
+  "base_commit": "ad9671f3808cd45115687ada6b2bc2bcda17ecb5",
+  "source_tree": "d06b4e1b00df725a335311cb90af2794816c5eca",
+  "test_file_sha256": "c7a8d0d1ae5597974ba5ac75563df8021879847f770b3262674bc78fb4f45d6e",
+  "requirements": {
+    "R1": {
+      "statement": "Matching input-suspension resume restores the prior aggregate state and each present output stream started state.",
+      "acceptance": [
+        "AE1",
+        "AE2",
+        "AE4",
+        "AE5"
+      ],
+      "review_proof": {
+        "owner": "implementation source reviewer",
+        "stage": "final implementation head",
+        "criteria": "Review that the existing single-depth snapshot records aggregate state before suspension and restores it once with independent output flags."
+      }
+    },
+    "R2": {
+      "statement": "Ordinary resume retains input restoration, repeated matched cycles, missing streams, and output capture resumption.",
+      "acceptance": [
+        "AE3",
+        "AE4",
+        "AE5"
+      ],
+      "review_proof": {
+        "owner": "implementation source reviewer",
+        "stage": "final implementation head",
+        "criteria": "Review the no-snapshot path and preserved capture APIs; run the affected capture, debugging, and logging suites."
+      }
+    },
+    "R3": {
+      "statement": "Low-level capture states are exactly initialized, started, suspended, done, or None. Aggregate states are exactly started, suspended, stopped, or None.",
+      "acceptance": [],
+      "review_proof": {
+        "owner": "type-check and source reviewer",
+        "stage": "final implementation head",
+        "criteria": "Inspect Literal declarations and snapshot payload against both exact state domains; confirm NoCapture remains stateless and repository type checks pass. This baseline gate does not certify the future type change."
+      }
+    },
+    "R4": {
+      "statement": "The written specification and ordinary acceptance assertions precede production changes, with hosted specification validation passing first.",
+      "acceptance": [],
+      "review_proof": {
+        "owner": "specification validation job and implementation reviewer",
+        "stage": "hosted specification commit before production implementation",
+        "criteria": "Verify the fixed original base/source tree, accepted test hash, exact collection and baseline outcomes; retain this commit and hosted run receipt before production changes."
+      }
+    },
+    "R5": {
+      "statement": "Accepted tests remain unchanged during implementation; specification commit/run receipts and content hashes establish chronology.",
+      "acceptance": [],
+      "review_proof": {
+        "owner": "final contribution reviewer",
+        "stage": "specification receipt and final implementation head",
+        "criteria": "Retain the gate receipt containing commit, run URL, original production source tree, and SHA256 hashes; compare accepted test content with that receipt on the final head."
+      }
+    },
+    "R7": {
+      "statement": "Keep personal plans, review records, organization data, and logs outside public commits; these specification helpers are temporary and fork-only.",
+      "acceptance": [],
+      "review_proof": {
+        "owner": "public diff reviewer",
+        "stage": "specification commit and final contribution head",
+        "criteria": "Audit public text and paths; verify only the four allowed specification files changed at this stage, keep generated evidence outside the checkout, and remove temporary contract/workflow/validator files from the final contribution diff."
+      }
+    },
+    "R9": {
+      "statement": "Preserve the existing matched-pair, single-depth suspension contract without arbitrary-depth capture management.",
+      "acceptance": [
+        "AE3",
+        "AE4",
+        "AE5"
+      ],
+      "review_proof": {
+        "owner": "implementation source reviewer",
+        "stage": "final implementation head",
+        "criteria": "Inspect the snapshot lifecycle for one matching resume and verify no stack, depth counter, or expanded capture API is introduced; confirm the paired-cycle and snapshot-consumption controls pass."
+      }
+    }
+  },
+  "acceptance": {
+    "AE1": {
+      "statement": "For sys and fd, an input-only nested suspension restores suspended aggregate and output states; a following disabled-capture context leaves stdout and stderr outside capture buffers.",
+      "cases": [
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_preserves_out_err_suspended_state[fd]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_preserves_out_err_suspended_state[sys]"
+      ]
+    },
+    "AE2": {
+      "statement": "With the actual live logging plugin enabled, a warning and following stdout/stderr writes leave the previously suspended capture buffers empty and aggregate state suspended.",
+      "cases": [
+        "testing/test_capture.py::test_live_logging_preserves_suspended_capture[fd]",
+        "testing/test_capture.py::test_live_logging_preserves_suspended_capture[sys]"
+      ]
+    },
+    "AE3": {
+      "statement": "Two matched input suspend/resume pairs restore the captured stdin object and active aggregate/output states; stdout and stderr are captured after each pair.",
+      "cases": [
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_out_err_started_state[fd]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_out_err_started_state[sys]"
+      ]
+    },
+    "AE4": {
+      "statement": "Independent output started states are preserved for every combination; absent stdout, stderr, both outputs, and stdin retain the existing restoration/no-snapshot behavior.",
+      "cases": [
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[err-only-fd]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[err-only-sys]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[neither-fd]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[neither-sys]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[out-err-fd]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[out-err-sys]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[out-only-fd]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[out-only-sys]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-output-fd]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-output-sys]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-stderr-fd]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-stderr-sys]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-stdin-fd]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-stdin-sys]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-stdout-fd]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-stdout-sys]"
+      ]
+    },
+    "AE5": {
+      "statement": "A consumed input suspension snapshot does not affect a later ordinary suspend/resume, which starts output capture and records stdout/stderr.",
+      "cases": [
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_snapshot_consumed_before_ordinary_resume[fd]",
+        "testing/test_capture.py::TestCaptureManager::test_suspend_in_snapshot_consumed_before_ordinary_resume[sys]"
+      ]
+    }
+  },
+  "cases": {
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_preserves_out_err_suspended_state[fd]": {
+      "outcome": "failed",
+      "failure_message": "AssertionError: disabled context restarted suspended capture"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_preserves_out_err_suspended_state[sys]": {
+      "outcome": "failed",
+      "failure_message": "AssertionError: disabled context restarted suspended capture"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[err-only-fd]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[err-only-sys]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[neither-fd]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[neither-sys]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[out-err-fd]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[out-err-sys]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[out-only-fd]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_independent_output_states[out-only-sys]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_out_err_started_state[fd]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_restores_out_err_started_state[sys]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_snapshot_consumed_before_ordinary_resume[fd]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_snapshot_consumed_before_ordinary_resume[sys]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-output-fd]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-output-sys]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-stderr-fd]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-stderr-sys]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-stdin-fd]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-stdin-sys]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-stdout-fd]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::TestCaptureManager::test_suspend_in_with_missing_streams[no-stdout-sys]": {
+      "outcome": "passed"
+    },
+    "testing/test_capture.py::test_live_logging_preserves_suspended_capture[fd]": {
+      "outcome": "failed",
+      "failure_message": "AssertionError: live logging restarted suspended capture"
+    },
+    "testing/test_capture.py::test_live_logging_preserves_suspended_capture[sys]": {
+      "outcome": "failed",
+      "failure_message": "AssertionError: live logging restarted suspended capture"
+    }
+  }
+}
